@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Executable wrapper untuk quick-convert."""
+
+from pathlib import Path
+import sys
+
+
+def _setup_path() -> None:
+    repo_src = Path(__file__).resolve().parent.parent / "src"
+    installed_pkg = Path.home() / ".local" / "share" / "quick-convert"
+    for candidate in (repo_src, installed_pkg):
+        if candidate.is_dir():
+            if str(candidate) not in sys.path:
+                sys.path.insert(0, str(candidate))
+            break
+
+
+_setup_path()
+
+from quick_convert.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())
