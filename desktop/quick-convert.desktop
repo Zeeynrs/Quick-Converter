@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Quick Convert
+GenericName=File Converter
+Comment=Ubah format file dari menu klik kanan file manager
+Exec=quick-convert %F
+Icon=view-refresh
+Terminal=false
+Categories=Utility;
+NoDisplay=true

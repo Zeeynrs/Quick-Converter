@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/allfiles;
+Actions=convertHere;convertTo;
+X-KDE-Priority=TopLevel
+X-KDE-Submenu=Ubah Format
+X-KDE-Submenu[en]=Convert
+X-KDE-Submenu[id]=Ubah Format
+
+[Desktop Action convertHere]
+Name=Convert Here...
+Name[id]=Ubah Format di Sini...
+Icon=view-refresh
+Exec=quick-convert %F
+
+[Desktop Action convertTo]
+Name=Convert to Folder...
+Name[id]=Ubah Format ke Folder...
+Icon=document-open-folder
+Exec=quick-convert --choose-dir %F
