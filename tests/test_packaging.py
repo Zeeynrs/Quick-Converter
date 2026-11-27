@@ -33,6 +33,23 @@ class TestPackaging(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertTrue((Path(tmp) / "sample.webp").exists())
 
+    def test_bin_prefers_repo_src_over_installed_package(self):
+        with tempfile.TemporaryDirectory() as fake_home:
+            shadow = Path(fake_home) / ".local" / "share" / "quick-convert" / "quick_convert"
+            shadow.mkdir(parents=True)
+            (shadow / "__init__.py").write_text('__version__ = "99.99.99-stale"\n', encoding="utf-8")
+            (shadow / "cli.py").write_text('def main():\n    print("STALE")\n    return 0\n', encoding="utf-8")
+            env = {"HOME": fake_home, "PATH": "/usr/bin:/bin"}
+            res = subprocess.run(
+                [str(ROOT / "bin" / "quick-convert"), "--version"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertNotIn("STALE", res.stdout)
+            self.assertIn("1.0.0", res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

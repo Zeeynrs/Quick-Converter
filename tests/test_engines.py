@@ -91,6 +91,70 @@ class TestEngines(unittest.TestCase):
             self.assertEqual(res.status, "ok")
             self.assertEqual(recorded[0], ["/usr/bin/magick", str(a), str(b), str(out_pdf)])
 
+    def test_run_conversion_job_multiframe_magick_routes_to_pages_dir_and_missing_output_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "anim.gif"
+            src.write_bytes(b"GIF89a")
+            out_png = Path(tmp) / "anim.png"
+
+            def fake_multiframe(cmd, **kwargs):
+                out_arg = Path(cmd[-1])
+                (out_arg.parent / f"{out_arg.stem}-0.png").write_bytes(b"f0")
+                (out_arg.parent / f"{out_arg.stem}-1.png").write_bytes(b"f1")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+
+            job = ConversionJob("convert", (src,), out_png, "png", ".gif")
+            res = run_conversion_job(job, run_fn=fake_multiframe, which_fn=lambda n: f"/usr/bin/{n}")
+            self.assertEqual(res.status, "ok")
+            self.assertFalse(out_png.exists())
+            self.assertTrue((Path(tmp) / "anim_pages" / "anim-0.png").exists())
+            self.assertTrue((Path(tmp) / "anim_pages" / "anim-1.png").exists())
+
+            def fake_noop(cmd, **kwargs):
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+
+            res_err = run_conversion_job(job, run_fn=fake_noop, which_fn=lambda n: f"/usr/bin/{n}")
+            self.assertEqual(res_err.status, "error")
+
+    def test_pandoc_txt_uses_plain_format_and_pdf_checks_pdf_engine(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "doc.md"
+            src.write_text("# Hi\n", encoding="utf-8")
+            out_txt = Path(tmp) / "doc.txt"
+            recorded = []
+
+            def fake_run(cmd, **kwargs):
+                recorded.append(cmd)
+                out_txt.write_text("Hi\n", encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+
+            txt_job = ConversionJob("convert", (src,), out_txt, "txt", ".md")
+            res = run_conversion_job(txt_job, run_fn=fake_run, which_fn=lambda n: f"/usr/bin/{n}")
+            self.assertEqual(res.status, "ok")
+            self.assertIn("-t", recorded[0])
+            self.assertIn("plain", recorded[0])
+
+            pdf_job = ConversionJob("convert", (src,), Path(tmp) / "doc.pdf", "pdf", ".md")
+            missing = find_missing_engines(
+                [pdf_job],
+                which_fn=lambda n: "/usr/bin/pandoc" if n == "pandoc" else None,
+            )
+            self.assertEqual([m.name for m in missing], ["pandoc-pdf-engine"])
+
+            pdf_cmds = []
+
+            def fake_pdf_run(cmd, **kwargs):
+                pdf_cmds.append(cmd)
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+
+            res_pdf = run_conversion_job(
+                pdf_job,
+                run_fn=fake_pdf_run,
+                which_fn=lambda n: f"/usr/bin/{n}" if n in ("pandoc", "typst") else None,
+            )
+            self.assertEqual(res_pdf.status, "ok")
+            self.assertIn("--pdf-engine=typst", pdf_cmds[0])
+
 
 if __name__ == "__main__":
     unittest.main()

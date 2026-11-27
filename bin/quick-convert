@@ -9,8 +9,10 @@ def _setup_path() -> None:
     repo_src = Path(__file__).resolve().parent.parent / "src"
     installed_pkg = Path.home() / ".local" / "share" / "quick-convert"
     for candidate in (repo_src, installed_pkg):
-        if candidate.is_dir() and str(candidate) not in sys.path:
-            sys.path.insert(0, str(candidate))
+        if candidate.is_dir():
+            if str(candidate) not in sys.path:
+                sys.path.insert(0, str(candidate))
+            break
 
 
 _setup_path()

@@ -9,11 +9,21 @@ import subprocess
 import tempfile
 
 from quick_convert.formats import get_file_category, required_engines
-from quick_convert.paths import ConversionJob
+from quick_convert.paths import ConversionJob, unique_dir_path
+
+_PANDOC_PDF_ENGINES: tuple[str, ...] = (
+    "pdflatex",
+    "xelatex",
+    "lualatex",
+    "typst",
+    "weasyprint",
+    "wkhtmltopdf",
+)
 
 _INSTALL_HINTS: dict[str, str] = {
     "libreoffice": "sudo pacman -S libreoffice-fresh  # atau libreoffice-still",
     "pandoc": "sudo pacman -S pandoc",
+    "pandoc-pdf-engine": "sudo pacman -S typst  # atau texlive-latexrecommended / python-weasyprint",
     "ffmpeg": "sudo pacman -S ffmpeg",
     "magick": "sudo pacman -S imagemagick",
     "pdftoppm": "sudo pacman -S poppler",
@@ -44,6 +54,13 @@ def _resolve_engine_binary(name: str, which_fn=shutil.which) -> str | None:
     return which_fn(name)
 
 
+def _resolve_pandoc_pdf_engine(which_fn=shutil.which) -> str | None:
+    for eng in _PANDOC_PDF_ENGINES:
+        if which_fn(eng):
+            return eng
+    return None
+
+
 def find_missing_engines(jobs: list[ConversionJob], which_fn=shutil.which) -> list[MissingEngine]:
     """Memeriksa apakah seluruh engine yang dibutuhkan daftar job tersedia di PATH."""
     seen: set[str] = set()
@@ -52,14 +69,20 @@ def find_missing_engines(jobs: list[ConversionJob], which_fn=shutil.which) -> li
     for job in jobs:
         if job.action in ("skip", "copy"):
             continue
+        cat = get_file_category(job.sources[0])
         needed = list(required_engines(job.src_ext, job.target_id))
-        if job.target_id == "webp" and get_file_category(job.sources[0]) in ("office", "pdf"):
+        if job.target_id == "webp" and cat in ("office", "pdf"):
             needed.append("magick")
+        if cat == "markup" and job.target_id == "pdf":
+            needed.append("pandoc-pdf-engine")
         for eng in needed:
             if eng in seen:
                 continue
             seen.add(eng)
-            if not _resolve_engine_binary(eng, which_fn=which_fn):
+            if eng == "pandoc-pdf-engine":
+                if not _resolve_pandoc_pdf_engine(which_fn=which_fn):
+                    missing.append(MissingEngine(eng, _INSTALL_HINTS[eng]))
+            elif not _resolve_engine_binary(eng, which_fn=which_fn):
                 missing.append(MissingEngine(eng, _INSTALL_HINTS.get(eng, eng)))
 
     return missing
@@ -223,8 +246,22 @@ def run_conversion_job(
             magick = _resolve_engine_binary("magick", which_fn=which_fn)
             if not magick:
                 return JobResult(job, "error", "Engine magick tidak ditemukan")
-            ok, err = _run_checked([magick, str(src), str(job.output_path)], run_fn)
-            return JobResult(job, "ok" if ok else "error", f"Berhasil diubah ke {job.output_path}" if ok else err)
+            with tempfile.TemporaryDirectory() as tmp_img_dir:
+                tmp_out = Path(tmp_img_dir) / job.output_path.name
+                ok, err = _run_checked([magick, str(src), str(tmp_out)], run_fn)
+                if not ok:
+                    return JobResult(job, "error", err)
+                if tmp_out.exists():
+                    shutil.move(str(tmp_out), str(job.output_path))
+                    return JobResult(job, "ok", f"Berhasil diubah ke {job.output_path}")
+                frames = sorted(Path(tmp_img_dir).iterdir())
+                if frames:
+                    pages_dir = unique_dir_path(job.output_path.parent / f"{src.stem}_pages")
+                    pages_dir.mkdir(parents=True, exist_ok=True)
+                    for frame in frames:
+                        shutil.move(str(frame), str(pages_dir / frame.name))
+                    return JobResult(job, "ok", f"Frame/halaman disimpan ke {pages_dir}")
+                return JobResult(job, "error", f"magick tidak menghasilkan file output untuk {src.name}")
 
         if cat in ("video", "audio"):
             ffmpeg = _resolve_engine_binary("ffmpeg", which_fn=which_fn)
@@ -243,7 +280,16 @@ def run_conversion_job(
             pandoc = _resolve_engine_binary("pandoc", which_fn=which_fn)
             if not pandoc:
                 return JobResult(job, "error", "Engine pandoc tidak ditemukan")
-            ok, err = _run_checked([pandoc, str(src), "-o", str(job.output_path)], run_fn)
+            cmd = [pandoc, str(src)]
+            if job.target_id == "txt":
+                cmd.extend(["-t", "plain"])
+            elif job.target_id == "pdf":
+                pdf_engine = _resolve_pandoc_pdf_engine(which_fn=which_fn)
+                if not pdf_engine:
+                    return JobResult(job, "error", f"PDF engine untuk pandoc belum terpasang ({_INSTALL_HINTS['pandoc-pdf-engine']})")
+                cmd.append(f"--pdf-engine={pdf_engine}")
+            cmd.extend(["-o", str(job.output_path)])
+            ok, err = _run_checked(cmd, run_fn)
             return JobResult(job, "ok" if ok else "error", f"Berhasil diubah ke {job.output_path}" if ok else err)
 
         return JobResult(job, "error", f"Kategori tidak didukung: {src.suffix}")
